@@ -19,12 +19,10 @@ from aiogram.types import (
 from aiogram.client.default import DefaultBotProperties
 
 from quiz.models import TelegramUser  # Django modelingiz
-# 📌 Eslatma: telegram_id, full_name, username ustunlari mavjud bo'lishi kerak
-
 
 ADMINS = [7129769569]
 # --- BOT SETUP ---
-API_TOKEN = '7914431289:AAGk_03dj9grsngtRTBUvN2DSashtk5HU-Y'  # ⚠️ Tokenni yashiring!
+API_TOKEN = '7914431289:AAE6NErXe7itNmmdEkFz_07mTbeBK2cP8QA'  # ⚠️ Tokenni yashiring!
 bot = Bot(
     token=API_TOKEN,
     default=DefaultBotProperties(parse_mode="HTML")
@@ -119,7 +117,6 @@ async def handle_excel_file(message: Message):
 
     file = message.document
 
-
     if not file.file_name.endswith('.xlsx'):
         await message.answer("❗ Faqat .xlsx formatdagi fayllarni yuboring.")
         return
@@ -170,9 +167,15 @@ async def send_next_question(user_id):
             user_id,
             f"🏁 Test yakunlandi! To‘plagan ballingiz: <b>{session['score']}/{len(session['quizzes'])}</b>"
         )
+        # Sessiyani tozalash
+        user_sessions.pop(user_id, None)
         return
 
     quiz = session['quizzes'][session['current_index']]
+
+    # Savol yuborilayotganini belgilash
+    session['is_waiting'] = True
+    session['current_poll_id'] = None  # Poll ID ni saqlash uchun
 
     msg = await bot.send_poll(
         chat_id=user_id,
@@ -183,10 +186,19 @@ async def send_next_question(user_id):
         is_anonymous=False
     )
 
-    # Javobni kutish
-    await asyncio.sleep(60)
-    session['current_index'] += 1
-    await send_next_question(user_id)
+    session['current_poll_id'] = msg.poll.id  # Poll ID ni saqlash
+
+    # 60 soniya kutish, lekin javob kelsa, kutish to‘xtatiladi
+    try:
+        for _ in range(60):
+            if not session.get('is_waiting', False):
+                break
+            await asyncio.sleep(1)
+    finally:
+        if session.get('is_waiting', False):
+            session['is_waiting'] = False
+            session['current_index'] += 1
+            await send_next_question(user_id)
 
 # Javobni qabul qilish
 @dp.poll_answer()
@@ -194,7 +206,11 @@ async def handle_poll_answer(poll_answer: types.PollAnswer):
     user_id = poll_answer.user.id
     session = user_sessions.get(user_id)
 
-    if session is None:
+    if session is None or not session.get('is_waiting', False):
+        return
+
+    # Faqat joriy poll uchun javobni qabul qilish
+    if session.get('current_poll_id') != poll_answer.poll_id:
         return
 
     current_index = session['current_index']
@@ -207,7 +223,8 @@ async def handle_poll_answer(poll_answer: types.PollAnswer):
     if selected_option == quiz['correct_option_id']:
         session['score'] += 1
 
-    # 1 daqiqadan oldin tugallansa, darhol keyingi savol
+    # Savol kutilayotgan holatni o‘chirish va keyingi savolga o‘tish
+    session['is_waiting'] = False
     session['current_index'] += 1
     await send_next_question(user_id)
 

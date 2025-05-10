@@ -75,10 +75,15 @@ WSGI_APPLICATION = 'quiz_project.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'quiz_db',           # PostgreSQLda yaratgan bazang nomi
+        'USER': 'postgres',          # PostgreSQL foydalanuvchisi
+        'PASSWORD': 'Nodirbek', # Parol (to‘g‘risini yoz)
+        'HOST': 'localhost',         # Agar lokalda bo‘lsa
+        'PORT': '5432',              # Odatiy port
     }
 }
+
 
 
 # Password validation
