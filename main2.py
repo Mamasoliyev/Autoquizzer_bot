@@ -1,7 +1,7 @@
 import os
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'quiz_project.settings')  # loyihangiz nomi
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'quiz_project.settings')  # Django sozlamalarini o‘rnatish
 import django
-django.setup()
+django.setup()  # Django-ni ishga tushirish
 
 import pandas as pd
 import asyncio
@@ -17,10 +17,9 @@ from aiogram.types import (
 )
 from aiogram.client.default import DefaultBotProperties
 
-from quiz.models import TelegramUser  # Django modelingiz
+from quiz.models import TelegramUser, Question, AnswerOption, UserAnswer  # Modellar importi sozlamalardan keyin
 
 ADMINS = [7129769569]
-# --- BOT SETUP ---
 API_TOKEN = '7914431289:AAE6NErXe7itNmmdEkFz_07mTbeBK2cP8QA'  # ⚠️ Tokenni yashiring!
 bot = Bot(
     token=API_TOKEN,
@@ -67,10 +66,30 @@ def read_quiz_from_excel(file_path):
 def register_user(telegram_id, full_name, username):
     TelegramUser.objects.get_or_create(
         telegram_id=telegram_id,
-        defaults={
-            'full_name': full_name,
-            'username': username
-        }
+        defaults={'full_name': full_name, 'username': username}
+    )
+
+# 🔄 Savol va javoblarni bazada saqlash
+@sync_to_async
+def save_question_and_options(question_text, options, correct_option_id):
+    question, _ = Question.objects.get_or_create(text=question_text)
+    for i, option_text in enumerate(options):
+        is_correct = (i == correct_option_id)
+        AnswerOption.objects.get_or_create(
+            question=question,
+            text=option_text,
+            defaults={'is_correct': is_correct}
+        )
+    return question
+
+# 🔄 Javobni UserAnswer ga saqlash
+@sync_to_async
+def save_user_answer(user, question, selected_option, is_correct):
+    UserAnswer.objects.create(
+        user=user,
+        question=question,
+        selected_option=selected_option,
+        is_correct=is_correct
     )
 
 # /start komandasi
@@ -81,7 +100,6 @@ async def cmd_start(message: Message):
         full_name=message.from_user.full_name,
         username=message.from_user.username
     )
-
     await message.answer(
         "🎉 <b>Assalomu alaykum!</b>\n\n"
         "📊 Siz Excel fayli orqali o‘zingizga mos quiz (test) yaratmoqchimisiz?\n\n"
@@ -117,7 +135,6 @@ async def cmd_help(message: Message):
     """
     await message.answer(help_message)
 
-
 # Fayl yuborilganda
 @dp.message(F.document)
 async def handle_excel_file(message: Message):
@@ -148,9 +165,7 @@ async def handle_excel_file(message: Message):
 
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="🔔 Testni boshlash",
-                    callback_data="start_quiz")]
+                [InlineKeyboardButton(text="🔔 Testni boshlash", callback_data="start_quiz")]
             ]
         )
 
@@ -183,24 +198,29 @@ async def send_next_question(user_id):
 ❌ Noto'g'ri javoblar soni: <b>{session['incorrect']}</b>
 """
         )
-        # Sessiyani tozalash
         user_sessions.pop(user_id, None)
         return
 
     quiz = session['quizzes'][session['current_index']]
 
-    # Savolni yuborish
+    user = await sync_to_async(TelegramUser.objects.get)(telegram_id=user_id)
+    question = await save_question_and_options(quiz['question'], quiz['options'], quiz['correct_option_id'])
+
+    total = len(session['quizzes'])
+    current = session['current_index'] + 1
+    numbered_question = f"{current}/{total}. {quiz['question']}"
+
     msg = await bot.send_poll(
         chat_id=user_id,
-        question=quiz['question'],
+        question=numbered_question,
         options=quiz['options'],
         type='quiz',
         correct_option_id=quiz['correct_option_id'],
         is_anonymous=False
     )
 
-    session['current_poll_id'] = msg.poll.id  # Poll ID ni saqlash
-    session['current_message_id'] = msg.message_id  # Poll xabar ID si
+    session['current_poll_id'] = msg.poll.id
+    session['current_message_id'] = msg.message_id
 
 # Javobni qabul qilish
 @dp.poll_answer()
@@ -211,19 +231,26 @@ async def handle_poll_answer(poll_answer: types.PollAnswer):
     if session is None or session['current_index'] >= len(session['quizzes']):
         return
 
-    # Faqat joriy poll uchun javobni qabul qilish
     if session.get('current_poll_id') != poll_answer.poll_id:
         return
 
     quiz = session['quizzes'][session['current_index']]
-    selected_option = poll_answer.option_ids[0]
+    selected_option_id = poll_answer.option_ids[0]
+    question = await sync_to_async(Question.objects.get)(text=quiz['question'])
+    selected_option = await sync_to_async(AnswerOption.objects.get)(
+        question=question,
+        text=quiz['options'][selected_option_id]
+    )
+    is_correct = (selected_option_id == quiz['correct_option_id'])
 
-    if selected_option == quiz['correct_option_id']:
+    user = await sync_to_async(TelegramUser.objects.get)(telegram_id=user_id)
+    await save_user_answer(user, question, selected_option, is_correct)
+
+    if is_correct:
         session['correct'] += 1
     else:
         session['incorrect'] += 1
 
-    # Keyingi savolga o‘tish
     session['current_index'] += 1
     await send_next_question(user_id)
 

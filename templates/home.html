@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="text-center">
+    <h1>Xush kelibsiz!</h1>
+    <p>Telegram botimiz orqali testlarni yeching va natijalarni bu yerda ko‘ring.</p>
+    <a href="{% url 'result' %}" class="btn btn-primary btn-lg">Reyting</a>
+    <a href="{% url 'bot_link' %}" class="btn btn-secondary btn-lg">Botga o‘tish</a>
+</div>
+{% endblock %}
